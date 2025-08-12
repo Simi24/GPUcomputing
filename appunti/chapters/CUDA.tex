@@ -20,7 +20,8 @@ Ci da quanti passi ci servono per risolvere l'algoritmo parallelo, anche in ques
 
 \subsection{Parallelizzazione di algoritmi}
 Quando vorremo vedere la complessita' computazionale degli algoritmi dovremo fare delle astrazioni ed usare qualcosa simile al PRAM.
-Nella pratica dovremo vedere come dividere la computazione in parallelo per capire come le varie parti vengano attribuite ai vari thread, tendenzialmente la partizione logica dei task la faremo noi, la parte dello scheduling se ne occupa il sistema ma e' bene conoscela perche' ad esempio in CUDA i processi di scheduling sono fortemente condizionanti dalla potenza del sistema e dovremo adeguare gli algoritmi sulla base dei meccanismi di scheduling. Quello che vorremo ottenere e' una massima occupancy delle unita' di calcolo.
+Nella pratica si partira' da un algoritmo sequenziale, dovremo vedere come dividere la computazione in parallelo per capire come le varie parti vengano attribuite ai vari thread, tendenzialmente la partizione logica dei task la faremo noi, la parte dello scheduling se ne occupa il sistema ma e' bene conoscela perche' ad esempio in CUDA i processi di scheduling sono fortemente condizionanti dalla potenza del sistema e dovremo adeguare gli algoritmi sulla base dei meccanismi di scheduling. Quello che vorremo ottenere e' una massima occupancy delle unita' di calcolo.
+Dipendentemente dal modello di memoria, un task può accedere a memoria condivisa o usare tecniche di message passing.
 
 \section{CPU multi-core e programmazione multi-threading}
 Un programma in esecuzione e' un processo che viene allocato nel OS e ha una serie di risorse che ha, convive con altri processi nel sistema ed e' una cosa abbastanza pesante, mentre i thread che compongono un processo sono dei sotto-processi ma piu' leggeri. Un processo in genere consiste di tanti thread. In genere vengono creati da delle operazioni di sistema come le fork in UNIX e vengono terminati dall'OS.
@@ -37,6 +38,12 @@ Ha un ciclo di vita, viene generato e viene ucciso, il processo chiude quando tu
     \item Finished: il thread ha completato la sua esecuzione e viene rimosso
 \end{itemize}
 
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.5\textwidth]{images/statiThread.png}
+    \caption{Stati di un thread}
+\end{figure}
+
 I vantaggi sono:
 \begin{itemize}
     \item Si possono avere tanti flussi di esecuzioni che possono avvantaggiarsi di sistemi multi-core
@@ -48,14 +55,11 @@ I vantaggi sono:
 Le difficolta' sono la concorrenza e il problema di avere uno spazio privato.
 
 \section{Programmazione multi-core}
-Noi vedremo la programmazione multi-thread su architetture multi-core. L'applicazione deve essere progettata considerando diversi fattori del sistema di calcolo parallali multi-core (e many core come le GPU), bisogna trovare di task, bilanciarli, suddividere i dati sui vari task (il problema e i dati lo devono consentire) e farlo in modo che tutti i task possano lavorare su queste porzioni di dati indipendentemente. Ci sono quindi tanti aspetti da tenere in considerazione sulla dipendenza e indipendenza dei dati. Test e debugging sono anchessi importanti quando si sviluppano gli algoritmi in ambito parallelo perche' ci sono tanti flussi di esecuzione.
-
-\section{Flip di un immagine}
-Vediamo come applicare la programmazione multi-thread per flippare un immagine, che e' molto parallelizzabile, vogliamo generare una nuova immagine partendo da quella data.
-
-Useremo il formato bitmap in cui ogni riga dell'immagine ha una lungezza n byte multipla di 4, ogni bit e' RGB e c'e' anche un header con dei metadati
+Noi vedremo la programmazione multi-thread su architetture multi-core. L'applicazione deve essere progettata considerando diversi fattori del sistema di calcolo parallelo multi-core (e many core come le GPU), bisogna trovare di task, bilanciarli, suddividere i dati sui vari task (il problema e i dati lo devono consentire) e farlo in modo che tutti i task possano lavorare su queste porzioni di dati indipendentemente. Ci sono quindi tanti aspetti da tenere in considerazione sulla dipendenza e indipendenza dei dati. Test e debugging sono anchessi importanti quando si sviluppano gli algoritmi in ambito parallelo perche' ci sono tanti flussi di esecuzione.
 
 \section{Programmazione CUDA}
+Pensare in parallelo significa avere chiaro quali feature la GPU espone al programmatore. Si lavora come su pthread o OpenMP. Si scrive una porzione di CUDA C (semplice estensione di C) per l'esecuzione sequenziale e lo si estende a migliaia di thread (permette di pensare 'ancora' in sequenziale)
+
 \begin{itemize}
     \item I dati stanno su host
     \item allocare spazio su GPU
@@ -72,18 +76,75 @@ Cuda presenta una gerarchia astratta di thread che si distribuisce su due livell
     \item block: un insieme di thread che possono cooperare tra loro
 \end{itemize}
 Questi possono avere dimensioni 1D, 2D o 3D. Tutto questo fa 9 combinazioni tra grid e block.
+
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.5\textwidth]{images/organizzazioneThread.png}
+    \caption{Organizzazione dei thread in CUDA}
+\end{figure}
+
 Ci sono delle limitazioni, un blocco puo' contenere al massimo 1024 thread.
 
-Il blocco di thread e' molto importante, dal punto di vista semantico ha un significato importante, possono cooperare tra loro tramite:
+Il blocco di thread e' molto importante, dal punto di vista semantico ha un significato, e' un gruppo di thread che possono cooperare tra loro tramite:
 \begin{itemize}
-    \item sincronizzazione: cooperare per uno stesso compito avvantaggiandosi da operazioni fatte da altri thread
-    \item comunicazione tramite la shared memory: e' una memoria cache che quindi ha tempi di accesso di molto ridotti
+    \item block-local synchronization, sincronizzazione: cooperare per uno stesso compito avvantaggiandosi da operazioni fatte da altri thread
+    \item block-local communication, comunicazione tramite la shared memory: e' una memoria cache che quindi ha tempi di accesso di molto ridotti
 \end{itemize}
 
 I thread vengono identificati univocamente tramite l'id di blocco e l'id di thread. blockIdx e threadIdx sono specificati in variabili globali, un kernel a runtime ha accesso a queste informazioni che vengono assegnate dinamicamente, hanno tre valori x, y, z di tipo uint32.
+
+\begin{lstlisting}[language=C]
+    
+#include <stdio.h>
+
+__global__ void checkIndex(void) {
+	printf("threadIdx:(%d, %d, %d) blockIdx:(%d, %d, %d) "
+					"blockDim:(%d, %d, %d) gridDim:(%d, %d, %d)\n",
+					threadIdx.x, threadIdx.y, threadIdx.z,
+					blockIdx.x, blockIdx.y, blockIdx.z,
+					blockDim.x, blockDim.y, blockDim.z,
+					gridDim.x,gridDim.y,gridDim.z);
+}
+
+/*
+* MAIN
+*/
+int main(int argc, char **argv) {
+
+	// grid and block definition
+	dim3 block(4);
+	dim3 grid(3);
+
+	// Print from host
+	printf("Print from host:\n");
+	printf("grid.x = %d\t grid.y = %d\t grid.z = %d\n", grid.x, grid.y, grid.z);
+	printf("block.x = %d\t block.y = %d\t block.z %d\n\n", block.x, block.y, block.z);
+
+	// Print from device
+	printf("Print from device:\n");
+	checkIndex<<<grid, block>>>();
+
+	// reset device
+	cudaDeviceReset();
+	return(0);
+}
+\end{lstlisting}
 Abbiamo accesso alle dimensioni della griglia e del blocco tramite le variabili blockDim e gridDim, che sono anchessi di tipo uint32. Anche in questo caso abbiamo tre componenti x, y, z.
 
 L'indice univoco del thread nei blocchi si calcola differentemente rispetto alle dimensioni del blocco:
+
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/indiceUnicoBlocchi.png}
+    \caption{Indice univoco dei thread nei blocchi}
+\end{figure}
+
+
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/grid1Dcoordinate1D.png}
+    \caption{Organizzazione della griglia 1D e coordinate 1D}
+\end{figure}
 
 \subsection{Lancio di un kernel CUDA}
 Quando prendo una funzione e la lancio con un kernel significa che prendo quella funzione e la lancio sulla GPU, i parametri di configurazione di esecuzione sono fatti in questo modo:
@@ -95,7 +156,7 @@ Il primo valore \texttt{gridDim} specifica la dimensione della griglia di blocch
 \subsection{Kernel concorrenti}
 Potrebbe verificarsi che numerosi kernel vengano lanciati sullo stesso host (dallo stesso processo o da processi diversi), potrei trovarmi nella situazione in cui ho diversi blocchi concorrenti sullo stesso device.
 
-Esiste l'api cudaDeviceSynchronize che permette di sincronizzare l'esecuzione dei kernel, significa che la cpu si sincronizza con tutti i kernel, praticamente il lancio del kernel diventa bloccante.
+Esiste l'api \underline{cudaDeviceSynchronize} che permette di sincronizzare l'esecuzione dei kernel, significa che la cpu si sincronizza con tutti i kernel, praticamente il lancio del kernel diventa bloccante.
 
 \subsection{Restrizioni del kernel}
 \begin{itemize}

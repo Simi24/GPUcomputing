@@ -35,13 +35,17 @@ Il fatto di poter avere gruppi di operazioni distinti, ci porta ad un problema n
 Non e' un problema banale, perche' e' irrisolvibile NP-hard, quindi ci si accontenta di soluzioni approssimative.
 
 \section{Tassonomia di Flynn}
-Si evidenzia i modelli SISD single instruction single data dove non c'e' nessun parallelismo e le operazioni vengono eseguite sequenzialmente.
-In contrapposizione abbiamo il SIMD (single instruction multiple data) dove abbiamo un'istruzione che viene eseguita su piu' dati, sono spesso dotate di librerie e hardware consistente che possono svolgere operazioni parallele.
-MISD (multiple instruction single data) e' un modello in cui piu' istruzioni vengono eseguite su un singolo dato, mentre il MIMD (multiple instruction multiple data) consente l'esecuzione di piu' istruzioni su piu' dati, rappresentando il massimo livello di parallelismo.
+Si evidenzia i modelli \textbf{SISD} single instruction single data dove non c'e' nessun parallelismo e le operazioni vengono eseguite sequenzialmente.
+In contrapposizione abbiamo il \textbf{SIMD} (single instruction multiple data) dove abbiamo un'istruzione che viene eseguita su piu' dati, sono spesso dotate di librerie e hardware consistente che possono svolgere operazioni parallele, in questo caso c'e' l'accesso ad una memoria globale.
+\textbf{MISD} (multiple instruction single data) e' un modello in cui piu' istruzioni vengono eseguite su un singolo dato, mentre il \textbf{MIMD} (multiple instruction multiple data) consente l'esecuzione di piu' istruzioni su piu' dati, rappresentando il massimo livello di parallelismo.
 
-Il modello SIMT e' interessante e viene introdotto da CUDA, qui ci sono tanti thread che svolgono tante operazioni su thread distinti, deve esserci un sistema book treading. C'e' un evoluzione del modello SIMD perche' lo cambia con il modello multithreading, decade il vincolo della singola istruzione, questo e' dato dalla presenza di branch nel codice. Questo modello e' molto utile perche' ci permette di pensare in modo sequenziale anche se complica un po' l'architettura perche' bisogna fare comunicare i thread. Questo e' il modello implementato dai processori GPU.
+Il modello \textbf{SIMT} e' interessante e viene introdotto da CUDA, qui ci sono tanti thread che svolgono tante operazioni su thread distinti, deve esserci un sistema book treading. C'e' un evoluzione del modello SIMD perche' lo cambia con il modello multithreading, decade il vincolo della singola istruzione, questo e' dato dalla presenza di branch nel codice. Questo modello e' molto utile perche' ci permette di pensare in modo sequenziale anche se complica un po' l'architettura perche' bisogna fare comunicare i thread. Questo e' il modello implementato dai processori GPU.
 
-%immagine simt vs simd
+\begin{figure}
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/simtvssimd.png}
+    \caption{Confronto tra SIMT e SIMD}
+\end{figure}
 
 Nel simt si fissano gli operandi, mentre nel simd no.
 
