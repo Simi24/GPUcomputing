@@ -188,7 +188,11 @@ I puntatori su host e device sono diversi, non e' possibile fare assegnamenti tr
 
 Non c'e' sempre un mapping 1-1 tra i puntatori host e device, guardiamo ora il mapping tra griglia 2d e coordinate 2d.
 Se prendiamo una griglia di blocchi 2x2 mostriamo gli indici dei blocchi e dei thread all'interno, mostriamo che poiche' i tre campi vengono definiti quando definiamo le griglie dobbiamo capire come usare x e y, il campo x viene considerato come campo che varia sulle colonne della matrice per converso la y indica le righe della matrice e si muove in verticale pensando che l'origine e' in alto a sinistra. Posso creare un doppio ordine per x e y di indici e le coppie ordinate mi indicizzano tutte le entry della matrice:
-%immagine griglia 2d - coordinate 2d
+
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/grid2d.png}
+\end{figure}
 
 Abbiamo quindi prodotto delle coordinate 2d (x,y) per ogni thread all'interno della griglia 2D e a questo punto e' sufficiente spostarsi nella colonna e nella riga:
 \begin{lstlisting}
@@ -200,14 +204,19 @@ A questo punto l'indice linearizzato lo ricaviamo in questo modo:
     int id = iy * nx + ix;
 \end{lstlisting}
 
-%codice somma matrixi
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/sommaMatriciKernel.png}
+\end{figure}
 
 Se si deve trattare una matrice che rappresenta l'immagine, si possono organizzare blocchi di dimensione fissata (16x16) e calcolare la griglia di conseguenza (5x4).
 
 \section{Modello di esecuzione CUDA}
 Vogliamo vedere cosa succede a questa miriade di thread che vengono eseguiti nelle GPU, come si arriva ai core. Lo faremo in modo astratto dall'architettura, senza entrare nei dettagli specifici delle implementazioni hardware.
 
-Quando abbiamo un thread che ha le sue risorse private (dei registri assegnati ad uno spazio locale) ed e' a sua volta in grado di chiamare delle funzioni. I thread vengono ordinati in blocchi, il blocco viene attribuito ad uno streaming multi-processor e devono essere eseguiti in parallelo su una risorsa. Vi e' l'uso e lo scambio di memorie veloci, lo shared memory per la comunicazione inter-thread. Una griglia (grid) e' un array di thread block che eseguono tutti lo stesso kernel, legge e scrive in global memory e sincronizza le chiamate di kernel tra loro dipendenti.
+\subsection{Panoramica}
+
+Quando abbiamo un thread che ha le sue risorse private (dei registri assegnati ad uno spazio locale) ed e' a sua volta in grado di chiamare delle funzioni. I thread vengono ordinati in blocchi, il blocco viene attribuito ad uno streaming multi-processor e devono essere eseguiti in parallelo su una risorsa. Vi e' l'uso e lo scambio di memorie veloci, la shared memory per la comunicazione inter-thread. Una griglia (grid) e' un array di thread block che eseguono tutti lo stesso kernel, legge e scrive in global memory e sincronizza le chiamate di kernel tra loro dipendenti.
 L'architettura della GPU e' disegnata come un array scalabile di streming multiprocessors, il parallelismo hardware della GPU e' ottenuto replicando questo elemento base.
 Gli elementi di uno streaming multiprocessor tipo sono:
 \begin{itemize}
@@ -222,9 +231,10 @@ Gli elementi di uno streaming multiprocessor tipo sono:
 Gli vengono assegnati i blocchi e lui e' in grado di gestire i blocchi attraverso lo scheduler.
 %immagine streaming multiprocessor
 
+\subsubsection{Mapping logico - fisico dei thread}
 In questo panorama dal punto di vista logico si ha un mapping tra thread e core (ogni thread ha un core) un blocco di thread viene eseguito su un streaming multiprocessor e la griglia viene mappata sul device.
 
-Esecuzione:
+\subsubsection{Esecuzione}
 \begin{itemize}
     \item mapping gerarchia thread in gerarchia processori sulla GPU
     \item GPU esegue uno o piu' kernel
@@ -234,13 +244,35 @@ Esecuzione:
     \item Gli SM eseguono i thread a gruppi di 32 thread chiamati warp
 \end{itemize}
 
+\subsection{Warp: architettura SIMT}
 Gli warp sono gruppi di 32 thread (con ID consecutivi) che messi insieme agli altri warp costituiscono un blocco. Ha una semantica che richiama al modello SIMD perche' idealmente si vorrebbe che i thread nel worp eseguissero simultaneamente la stessa istruzione. Questa cosa e' un problema perche' ogni thread ha un flusso a se, quindi si ricorre al modello SIMT questo implica perdita di efficienza. Ogni thread ha il suo program counter e register state. Ogni thread puo' eseguire cammini distinti di esecuzione delle istruzioni. I thread che compongono un warp iniziano assieme allo stesso indirizzo del progamma.
+32 e' un numero magico, ha origine dall'HW ed e' fondamentale nella programmazione CUDA per la scalabilita' e trasparenza. E' l'unita' minima di esecuzione che permette grande efficienza nell'uso della GPU. Ha un forte impatto sulle presatzioni degli algoritmi sviluppati. Concettualmente ha un comportamento modello SIMD ma nella pratica assume un modello SIMT.
 
+\subsubsection{HW multi-threading}
 Questi sono gli elementi HW di un ambiente multi-threading:
-%immagine hw multi-threading
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/hwMultithreading.png}
+\end{figure}
 
+\subsubsection{Registri}
 I registri sono usati per le variabili automatiche scalari e le coordinate dei thread:
 
+\begin{lstlisting}
+    __global__ void matrix_prod(float *a, float *b, float *c) {
+        int Row = blockIdx.y * blockDim.y + threadIdx.y;
+        int Col = blockIdx.x * blockDim.x + threadIdx.x;
+        if (Row < N && Col < N) {
+            float sum = 0.0f;
+            for (int k = 0; k < N; k++) {
+                sum += a[Row * N + k] * b[k * N + Col];
+            }
+            c[Row * N + Col] = sum;
+        }
+    }
+\end{lstlisting}
+
+\subsubsection{Logica warp}
 Dal punto di vista logico i warp mantiene la consistenza ma il blocco la perde un po', lo vediamo come blocco di thread ma quando viene passato alla macchina e diventa attivo questo viene ripartito in warp (la macchina vede una collezione di 32 thread) e poi lo passano al multiprocessore che si occupa dai warp che gli competono, questo accade indipendentemente dalla dimensione di griglia che abbiamo fissato.
 I warp condizionano come noi creiamo il kernel, ad esempio un kernel di 40 blocchi non ha molto senso, dato che dobbiamo eseguire gruppi di 32 thread alla volta e' meglio avere multipli di 32 (gli altri rimarrebbero inattivi e si mangerebbero risorse inutili).
 Uno warp puo' essere attivo o disattivo, e' attivo quando le risorse di computazione gli vengono assegnate, quando e' attivo si puo' trovare in diversi stati:
@@ -251,8 +283,10 @@ Uno warp puo' essere attivo o disattivo, e' attivo quando le risorse di computaz
 \end{itemize}
 %formula calcolo warp per blocco
 
+\subsubsection{Scheduling dei blocchi}
 Come funziona lo scheduling dei blocchi, ogni streaming multiprocessor riceve un numero di blocchi (questo varia a seconda di quanti SM ho) questo per non lasciare IDLE gli SM.
 
+\subsubsection{Ripartizione risorse}
 Le risorse vengono ripartite a seconda della griglia che andiamo a definire e nel momento in cui vengono ripartite non c'e' context switch ed e' per questo che cio' che puo' essere attivo e' limitato.
 Esistono limiti imposti dall'HW, come ad esempio il numero di blocchi che possono essere attivi contemporaneamente su un SM, il numero di thread per blocco, il numero di registri per thread, la dimensione della shared memory per blocco, la dimensione della global memory per blocco. 
 
@@ -269,24 +303,79 @@ Esiste un flag di uno strumento di profilazione per calcolare l'occupancy:
 \subsection{Latency hiding}
 Il grado di parallelismo a livello di thread utile a massimizzare l'utilizzo delle unita' funzionali di un SM dipende dal numero di warp residenti e attivi nel tempo. 
 La latenza e' definita come il numero di cicli necessari al completamento dell'istruzione. Per massimizzare il throughput occorre che lo scheduler abia sempre warp eleggibili ad ogni ciclo di clock. Si ha cosi' latency hiding quando i warp in attesa di esecuzione possono essere utilizzati per mascherare la latenza delle operazioni in corso.
+Classificazione dei tipi di istruzione che inducono latenza:
+\begin{itemize}
+    \item Istruzioni aritmetiche: tempo necessario per la terminazione dell'operazione
+    \item Istruzioni di memoria: tempo necessario al dato per giungere a destinazione
+\end{itemize}
 
 \subsection{Warp divergence}
 La divergenza e' un altro nemico insieme alla latenza, si esplicita in modo chiaro, ci sono dei branch all'interno del codice (if else), semplicemente difronte ad un thread si ha un ritardi sistematico e perdiamo la natura del parallelismo di un warp. Fa cadere il modello SIMD e diventa SIMT.
-%immagine esempio
+
+\begin{lstlisting}
+    __global__ void pari_dispari_1(int *c) {
+        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+        int a = 0, b = 0;
+
+        if (tid % 2 == 0) {
+            a = 2;
+        } else {
+            b = 1;
+        }
+
+        c[tid] = a + b;
+    }
+\end{lstlisting}
 
 Il compilatore fa dell'ottimizzazione per la divergenza (dove puo' ovviamente), aggiunge dei predicati alle istruzioni che verificano il vero o falso, calcolano quindi il predicato logico e le istruzioni del predicato e a questo punto i thread calcolano i predicati e non si sequenzializzano.
-%esempio dai, e' bello da vedere
+
+\begin{lstlisting}
+    if (x < 0) {
+        z = x - 2
+    }
+    else if (x >= 0) {
+        z = x + 2
+    }
+
+
+    p = (x<0)
+    p: z = x - 2
+    !p: z = x + 2
+\end{lstlisting}
 
 \subsection{Sincronizzazione}
 E' un altro aspetto fondamentale a livello di blocco, i thread possono seguire strade diverse e possono avere tempi diversi. Possiamo arrivare ad uno stadio in cui tutti dei thread hanno finito la loro esecuzione, e' importante quindi impostare delle barriere di sincronizzazione in cui tutti i thread si aspettano, questo per evitare delle race condition e per fare in modo di usare il risultato di altri thread.
-Si puo' fare a livello di sistema:
+Si puo' fare a livello di sistema, aspettiamo che venga completato un dato task su entrambi host e divice:
 \begin{lstlisting}
     cudaError_t cudaDeviceSynchronize(void);
 \end{lstlisting}
 
-ma anche a livello di blocco, si tratta di utilizzare le primitive di sincronizzazione fornite da CUDA, come \texttt{\_\_syncthreads()}, che permette di sincronizzare i thread all'interno di un blocco. Attenzione che sincronizzazione e divergenza possono portare ad un deadlock, quindi è importante progettare attentamente la logica del kernel per evitare situazioni di stallo.
+ma anche a livello di blocco, si tratta di utilizzare le primitive di sincronizzazione fornite da CUDA, come \texttt{\_\_syncthreads()}, che permette di sincronizzare i thread all'interno di un blocco.
+\begin{lstlisting}
+    __device__ void __syncthreads(void);
+\end{lstlisting}
 
-\subsubsection{Reduction}
+Ma anche a livello di warp, attendiamo che tutti i thread in un warp raggiungano lo stesso punto di esecuzione:
+\begin{lstlisting}
+    __device__ void __syncwarp(mask);
+\end{lstlisting}
+
+\subsubsection{Deadlock}
+Attenzione che sincronizzazione e divergenza possono portare ad un deadlock, quindi è importante progettare attentamente la logica del kernel per evitare situazioni di stallo.
+\begin{lstlisting}
+    if (threadIdx.x < 16){
+        F1();
+        __syncthreads();
+    }
+    else if (threadIdx.x >= 16) {
+        F2();
+        __syncthreads();
+    }
+\end{lstlisting}
+
+La prima meta' dei thread aspetta la seconda meta' per completare la propria esecuzione, creando una situazione di stallo.
+
+\subsection{Reduction}
 La reduction e' un operazione molto comune che e' la somma degli elementi di array di grandi dimensioni, se lo vogliamo fare in parallelo non e' cosi' scontata, possiamo fare questa cosa quando l'operatore soddisfa le proprieta' commutativa e associativa, questo significa che possiamo fare questa operazione riordinando i dati come vogliamo
 
 Il caso sequenziale e' banale:
@@ -325,17 +414,70 @@ Da qui possiamo pensare ad una strategia ricorsiva:
 \end{itemize}
 
 Dobbiamo pensare che i dati li dividiamo in blocchi, e poi combinare i risultati parziali usciti dai blocchi:
-%immagine somma parziali su blocchi + sincronizzazione
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/sommeParzialiBlocchi.png}
+\end{figure}
 
 %direi che si potrebbe mettere anche il codice della soluzione parallela con la risoluzione della warp divergence
 
-\subsubsection{Istogramma di un immagine}
+\begin{figure}[ht!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/reduction.png}
+\end{figure}
+
+Questa soluzione ha il problema della divergenza dei warp, l'if in cui controlliamo che l'indice del thread sia pari, possiamo pero' eliminare l'if:
+\begin{lstlisting}
+    for (int stride =1; stride < blockDim.x; stride *= 2) {
+        //convert tid into local array index 
+        int index = 2* stride * tid;
+        if(index < blockDim.x) {
+            idata[index] += idata[index + stride];
+        //synchronize within threadblock
+        __syncthreads();
+    }
+\end{lstlisting}
+
+\subsection{Operazioni atomiche}
 Poniamo un problema per porre il pretesto di usare delle operazioni atomiche che di perse' garantiscono l'accesso corretto ed univoco ai dati anche se piu' thread accedono allo stesso dato.
 L'istogramma di un immagine e' l'intensita' del colore RGB in un'immagine. Per calcolarlo ci serve avere operazioni atomiche perche' dobbiamo incrementare l'array di intensita' RGB accedendo in modo concorrente agli stessi pixel con piu' thread.
 
-Le operazioni atomiche in CUDA eseguono solo operazioni matematiche ma senza interruzione da parte di altri thread, sono definite da cuda:
+Le operazioni atomiche in CUDA eseguono solo operazioni matematiche ma senza interruzione da parte di altri thread questo perche' sono tradotte in una singola istruzione, sono definite da cuda:
 \begin{lstlisting}
     int atomicAdd(int *address, int val);
+\end{lstlisting}
+
+Le operazioni basilari sono:
+\begin{itemize}
+    \item Matematiche: add, subtract, maximum, minimum, increment, decrement
+    \item Bitwise: AND, bitwise OR, bitwise XOR
+    \item Swap: scambiano valore in moemoria con uno nuovo
+\end{itemize}
+
+L'idea per calcolare l'istogramma e' semplice, si alloca una struttura dati (un array lungo 3 * 256) per mantenere i valori dell'istrogramma e , per ogni pixel dell'immagine si effettua una atomicAdd() per incrementare il valore della frequenza dei colori presenti nel pixel.
+
+\begin{lstlisting}
+/*
+ * Kernel 1D that computes histogram on GPU
+ */
+__global__ void ppm_histGPU(PPM ppm, int *histogram) {
+
+   uint x = blockIdx.x * blockDim.x + threadIdx.x;
+
+  // pixel out of range
+   if (x >= ppm.width * ppm.height)
+      return;
+
+   // colors of the pixel
+   color R = ppm.image[3 * x];
+   color G = ppm.image[3 * x + 1];
+   color B = ppm.image[3 * x + 2];
+
+   // use atomic
+   atomicAdd(&histogram[R], 1);
+   atomicAdd(&histogram[G+256], 1);
+   atomicAdd(&histogram[B+512], 1);
+}
 \end{lstlisting}
 
 \subsubsection{Prodotto matriciale}
