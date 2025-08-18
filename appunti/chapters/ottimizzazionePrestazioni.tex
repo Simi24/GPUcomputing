@@ -210,9 +210,10 @@ Si puo' sincronizzare anche tra stream ed eventi, considerando bloccante l'attes
 Si può bloccare l'host fino a che il device non ha completato i task precedenti:
 \begin{lstlisting}
 cudaError_t cudaDeviceSynchronize();
-\end{minted}
+\end{lstlisting}
 
 Si puo bloccare l'host fino a che tutte le operazioni in uno stream sono completate (\texttt{cudaStreamSynchronize()}) oppure eseguire un test non-bloccante (\texttt{cudaStreamQuery()}):
+
 \begin{lstlisting}
 cudaError_t cudaStreamSynchronize(cudaStream_t stream);
 cudaError_t cudaStreamQuery(cudaStream_t stream);
@@ -229,4 +230,274 @@ Esiste una primitava per misurare il tempo intercorso tra due eventi:
 \begin{lstlisting}
     cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end);
 \end{lstlisting}
+
+\section{Librerie CUDA}
+Tutte le computazioni implementate nelle librerie CUDA sono accelerate dalla GPU. Per molte applicazioni offrono un buon bilanciamento tra usabilita' e prestazioni. Il vantaggio e' il minimo sforzo per il porting delle applicazioni su GPU, senza dover scrivere codice CUDA. Le librerie sono ottimizzate per le architetture NVIDIA e sono progettate per essere facili da usare. Inoltre noi non abbiamo nessun costo di mantenimento.
+
+Esempi di librerie CUDA:
+\begin{center}
+	\resizebox{\linewidth}{!}{\begin{tabular}{@{} ll @{}}
+			\hline
+			\textbf{Libreria}                     & \textbf{Dominio}                                    \\ \hline
+			cuFFT (NVIDIA)                        & Fast Fourier Transforms Linear                      \\
+			cuBLAS (NVIDIA)                       & Linear Algebra (BLAS Library)                       \\
+			cuSPARSE (NVIDIA)                     & Sparse Linear Algebra                               \\
+			cuRAND (NVIDIA)                       & Random Number Generation                            \\
+			NPP (NVIDIA)                          & Image and Signal Processing                         \\
+			CUSP (NVIDIA)                         & Sparse Linear Algebra and Graph Computations        \\
+			CUDA Math Library (NVIDIA)            & Mathematics                                         \\
+			Trust (terze parti)                   & Parallel Algorithms and Data Structures             \\
+			MAGMA (terze parti)                   & Next generation Linear Algebra                      \\ \hline
+	\end{tabular}}
+\end{center}
+
+\subsection{Workflow tipico}
+\begin{itemize}
+    \item Creare un handle specifico della libreria, un riferimento che consente di accedere alle funzioni della libreria.
+    \item Allocare la device memory per gli input e output alle funzioni della libreria, se necessario, convertire gli input al formato specifico di uso della libreria (numeri complessi)
+    \item Popolare con i dati nel formato specifico
+    \item Configurare le computazioni per l'esecuzione
+    \item Eseguire la chiamata della funzione di libreria che avvia la computazione sulla GPU
+    \item Recuperare i risultati della device memory
+    \item Se necessario, convertire i dati nel formato specifico o nativo dell'applicazione
+    \item Rilasciare le risorse CUDA allocate per la data libreria
+\end{itemize}
+
+\subsection{Libreria cuBLAS}
+Sono disponibili diverse funzioni per l'algebra lineare, tra cui:
+\begin{itemize}
+    \item Operazioni tra vettori
+    \item Operazioni tra matrici e vettori
+    \item Operazioni tra matrici
+\end{itemize}
+
+Questi sono le basi per lo sviuluppo delle LAPACK, che sono librerie di algebra lineare un po' piu' complesse, che implementano algoritmi per la risoluzione di sistemi lineari, decomposizioni e altro.
+Tutte le interfaccie messe a disposizione sono asincrone sulla GPU.
+
+Usa \textbf{column-major order} (leggo le colonne dall'alto verso il basso) perché chiunque ha scritto la libreria è stronzo (colpa di Fortran). Esempio: 
+$$
+\left[
+\begin{array}{c c c}
+	1 & 2 & 3 \\
+	4 & 5 & 6 \\
+	7 & 8 & 9
+\end{array}
+\right]
+\rightarrow \left[\begin{array}{c c c c c c c c c}
+	1 & 4 & 7 & 2 & 5 & 8 & 3 & 6  & 9
+\end{array}\right]
+\quad I(r,c) = c \cdot M  + r 
+$$
+
+Dove $(r,c)$ sono le coordinate del valore cercato e $M$ è l'altezza della matrice (dimensioni $M \times N$).
+
+\subsubsection{Operare con cuBLAS}
+\begin{itemize}
+    \item Creare un handle cublasCreateHandle
+    \item Allocare la memoria per gli input e output usando cudaMalloc
+    \item Popolare i dati di input nella memoria device usando cublasSetVector e cublasSetMatrix
+    \item Eseguire le operazioni desiderate usando le funzioni cuBLAS, ad esempio cublasSgemv
+    \item Recuperare i risultati dalla memoria device usando cublasGetVector e cublasGetMatrix
+    \item Rilasciare le risorse allocate usando cublasDestroy e cudaFree
+\end{itemize}
+
+\subsubsection{Funzioni all'interno di cuBLAS}
+Le prime funzioni che vediamo sono quelle per trasferire righe e colonne da una matrice A nella memoria del device ad una matrice B nella GPU memory space:
+\begin{lstlisting}
+    cublasSetMatrix(int rows, int cols, const float *A, int lda, float *B, int ldb)
+\end{lstlisting}
+
+I parametri sono:
+\begin{itemize}
+    \item \texttt{rows}: numero di righe della matrice A
+    \item \texttt{cols}: numero di colonne della matrice A
+    \item \texttt{A}: puntatore alla matrice A nella memoria del host
+    \item \texttt{lda}: leading dimension della matrice A
+    \item \texttt{B}: puntatore alla matrice B nella memoria del device
+    \item \texttt{ldb}: leading dimension della matrice B
+\end{itemize}
+
+Le funzioni inverse per trasferire i dati dalla memoria del device alla memoria del host sono:
+\begin{lstlisting}
+    cublasGetMatrixAsynch(int rows, int cols, const float *A, int lda, float *B, int ldb, cudaStream_t stream)
+\end{lstlisting}
+
+Danno la possibilita' di lavorare in asincrono specificando uno stream.
+
+Se volessi fare la copia di un vettore, potrei usare le seguenti funzioni:
+\begin{lstlisting}
+    cublasSetVector(int n, const float *A, int incx, float *B, int incy)
+    cublasGetVector(int n, const float *A, int incx, float *B, int incy)
+\end{lstlisting}
+
+Per gestire la libreria serve un \textbf{handle}, il quale si può generare tramite
+\begin{lstlisting}
+cublasCreate(cublasHandle_t* handle)
+\end{lstlisting}
+
+Viene passato ad ogni chiamata di funzione della libreria successiva. Al termine
+\begin{lstlisting}
+cublasDestroy(cublasHandle_t* handle)
+\end{lstlisting}
+per distruggerlo. Il tipo dell'handle è \texttt{cublasHandle\_t}. Esiste un tipo \texttt{cublasStatus\_t} usato per il report degli errori.
+
+Per trasferimenti device-device: copia \texttt{n} elementi da \texttt{x} a \texttt{y}:
+\begin{lstlisting}
+cublasScopy(handle, n, x, incx, y, incy)
+\end{lstlisting}
+
+In generale la libreria segue una naming convention \texttt{cublas<T>operation}, dove \texttt{<T>} può essere: 
+\begin{itemize}
+	\item \texttt{S} per parametri di tipo \texttt{float}
+
+	\item \texttt{D} per \texttt{double}
+
+	\item \texttt{C} per \texttt{complex  floats}
+
+	\item \texttt{Z} per \texttt{complex double}
+\end{itemize}
+Ad esempio, per l'operazione \texttt{axpy} le funzioni disponibili sono \texttt{cublasSaxpy}, \texttt{cublasDaxpy}, \texttt{cublasCaxpy}, \texttt{cublasZaxpy}.
+
+Si usa un valore di tipo \texttt{cublasOperation\_t} per indicare operazioni su matrici all'interno di funzioni: 
+\begin{itemize}
+	\item \texttt{CUBLAS\_OP\_N} per non-transpose
+
+	\item \texttt{CUBLAS\_OP\_T} per transpose
+
+	\item \texttt{CUBLAS\_OP\_C} per conjugate transpose
+\end{itemize}
+
+Per fare
+$$ result = \sum_{i=1}^{n} x[k] \cdot y[j], \quad k = 1 + (i-1) \cdot incx, \quad j = 1 + (i-1) \cdot incy $$
+tra vettori \texttt{x} e \texttt{y} di \texttt{n} elementi (dimensione dei tali nella naming convention) e mettere il risultato in \texttt{result}
+\begin{lstlisting}
+cublasStatus_t cublasSdot(cublasHandle_t handle, int n, 
+    const float *x, int incx, const float *y, 
+    int incy, float result)
+\end{lstlisting}
+
+Per fare 
+$$ y[i] = \alpha \cdot x[i] + y[i] \quad \forall i \in n $$
+con vettori \texttt{x} e \texttt{y} di dimensione \texttt{n}, risultato nel secondo vettore \texttt{y}
+\begin{lstlisting}
+cublasStatus_t cublasSaxpy(cublasHandle_t handle, int n,
+    const float *alpha, const float *x, int incx, 
+    const float *y, int incy)
+\end{lstlisting}
+
+Per fare 
+$$ y = \alpha Ax + \beta y$$
+dove $\alpha$ e $\beta$ sono scalari, $A$ è una matrice, $x$ e $y$ sono vettori
+\begin{lstlisting}
+cublasStatus_t cublasSgemv(cublasHandle_t handle, 
+    cublasOperation_t trans, int m, int n, 
+    const float *alpha, const float *A, 
+    int lda, const float *x, int incx, 
+    const float *beta, float *y, int incy)
+\end{lstlisting}
+
+Per fare
+$$ C = \alpha AB + \beta C$$
+dove $\alpha$ e $\beta$ scalari, $A$, $B$ e $C$ matrici
+\begin{lstlisting}
+cublasStatus_t cublasSgemm(cublasHandle_t handle,
+    cublasOperation_t transa, cublasOperation_t transb,
+    int m, int n, int k, const float *alpha,
+    const float *A, int lda,
+    const float *B, int ldb,
+    const float *beta, float *C, int ldc)
+\end{lstlisting}
+
+\subsection{cuRAND}
+Vuol dire generare numeri a caso, la storia dei generatori pseudo-casuale di numeri e' infinita. 
+Permette sequenze: 
+\begin{itemize}
+	\item Pseudo-random: soddisfa proprietà statistiche di una vera sequenza random, ma generata da un algoritmo deterministico
+	
+	\item Quasi-random: sequenza di punti $n$-dimensionali uniformemente generati secondo un algoritmo deterministico
+\end{itemize}
+
+Si compone di due parti:
+\begin{itemize}
+    \item curand.h per l'host
+    \item curand\_kernel.h per il device
+\end{itemize}
+
+\paragraph{Host API:} Dalla \href{https://docs.nvidia.com/cuda/curand/index.html}{\texttt{documentazione}}, passaggi:
+\begin{enumerate}
+	\item Crea un \textbf{nuovo generatore} del tipo desiderato con \texttt{curandCreateGenerator()}
+	
+	\item Setta i \textbf{parametri} del generatore; ad esempio: per settare il seed \texttt{curandSetPseudoRandomGeneratorSeed()}
+	
+	\item Alloca la memoria device con \texttt{cudaMalloc()}
+	
+	\item Genera i valori casuali necessari con \texttt{curandGenerate()} (o altre funzioni)
+	
+	\item Usa i valori
+	
+	\item Quando non serve più il generatore va distrutto con \texttt{curandDestroyGenerator()}
+\end{enumerate}
+
+Alcune funzioni per l'host: 
+\begin{itemize}
+	\item Per creare il generatore
+	\begin{lstlisting}
+curandCreateGenerator(&g, GEN_TYPE)
+	\end{lstlisting}
+	Dove il parametro \texttt{GEN\_TYPE} può essere \texttt{CURAND\_RNG\_PSEUDO\_DEFAULT}, oppure \texttt{CURAND\_RNG\_PSEUDO\_XORWOW} (differenze trascurabili)
+	
+	\item Per impostare il seed
+	\begin{lstlisting}
+curandSetRandomGeneratorSeed(g, SEED)
+	\end{lstlisting}
+	ma importa poco, uno qualunque va bene (e.g, \texttt{time(NULL)})
+	
+	\item Per generare una distribuzione
+	\begin{lstlisting}
+curandGenerate______(...)
+	\end{lstlisting}
+	dipende dalla distribuzione che si vuole generare, ad esempio: \texttt{curandGenerateUniform(g, src, n)} oppure \texttt{curandGenerateNormal(g, src, n, mean, stddev)}. 
+
+	\item Per distruggere il generatore
+	\begin{lstlisting}
+curandDestroyGenerator(g)
+	\end{lstlisting}
+\end{itemize}
+
+La funzione \texttt{curandGenerate()} permette di generare valori in maniera asincrona, molto più veloce per quantità elevate di valori. Usare questa libreria richiederebbe poi di dover passare i dati generati alla GPU (\texttt{src} all'interno della funzione è un puntatore host), introducendo overhead. Per risolvere si può usare la Device API.
+
+\paragraph{Device API:} Per generare valori sul device: 
+\begin{enumerate}
+	\item Pre-allocare un set di cuRAND state objects nella device memory per ogni thread (gestiscono lo stato)
+
+	\item Opzionale, pre-allocare device memory per tenere i valori generati (se devono poi essere passati all'host o essere mantenuti per kernel successivi)
+
+	\item Inizializzare lo stato di tutti gli state objects con una kernal call
+
+	\item Chiamare una funzione cuRAND per generare valori casuali usando gli state objects allocati
+
+	\item Opzionale, trasferire i valori all'host (se è stata allocata la memoria in precedenza)
+\end{enumerate}
+
+Il vantaggio di generare valori sul device e' che non dobbiamo trasferire i numeri al device, ma li generiamo in loco e i thread li consumano li'.
+
+\subsection{cuFFT}
+La libreria cuFFT (CUDA Fast Fourier Transform) permette di eseguire trasformate di Fourier in modo efficiente sulla GPU. Supporta sia segnali unidimensionali che multidimensionali e offre diverse opzioni per la pianificazione e l'esecuzione delle trasformate.
+
+La libreria prevede che venga definito un piano cufftPlan1d() per le trasformate unidimensionali, cufftPlan2d() per le trasformate bidimensionali e cufftPlan3d() per le trasformate tridimensionali. Questi piani contengono informazioni sulla dimensione del segnale e sul tipo di trasformata da eseguire.
+
+\begin{lstlisting}
+    cufftResult cufftPlan1d(cufftHandle *plan, int nx, cufftType type, int batch);
+\end{lstlisting}
+C'e' la versione batched per lavorare su piu' batch distinti e lavorare in parallelo facendo sovrapposizioni.
+
+\subsubsection{Workflow}
+\begin{itemize}
+    \item creare e configurare il piano cuFFT plan
+    \item Allocare la memoria con cudaMalloc
+    \item Poplare la memoria con i campioni del segnale di input con cudaMemcpy
+    \item Eseguire il piano usando la funzione cufftExec*
+    \item Recuperare i risultati dalla memoria device con cudaMemcpy
+    \item Rilasciare le risorse allocate con cufftDestroy e cudaFree
+\end{itemize}
 
