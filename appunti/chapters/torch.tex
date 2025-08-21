@@ -289,19 +289,17 @@ Le cose importanti sono:
                 ]
                 \begin{algorithm}[H]
                     \caption{Training Process}
-                    \begin{algorithmic}[1]
-                        \For{$n$ epoche}
-                            \State \texttt{dividi dataset in batch}
-                            \For{\texttt{every batch}}
-                                \For{\texttt{every sample}}
-                                    \State \texttt{valutazione del modello}
-                                    \State \texttt{calcolo della loss}
-                                    \State \texttt{gradient backpropagation}
-                                \EndFor
-                                \State \texttt{update del modello}
-                            \EndFor
-                        \EndFor
-                    \end{algorithmic}
+                    \For{$n$ epoche}{
+                        \texttt{dividi dataset in batch}\;
+                        \ForEach{\texttt{every batch}}{
+                            \ForEach{\texttt{every sample}}{
+                                \texttt{valutazione del modello}\;
+                                \texttt{calcolo della loss}\;
+                                \texttt{gradient backpropagation}\;
+                            }
+                            \texttt{update del modello}\;
+                        }
+                    }
                 \end{algorithm}
             \end{tcolorbox}
         \end{minipage}
